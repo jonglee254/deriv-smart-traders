@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Deriv Smart Trader</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        'dbg':    '#0E0E0E',
+        'dcard':  '#151717',
+        'dhover': '#242828',
+        'dred':   '#FF444F',
+        'dgreen': '#00D09C',
+        'dloss':  '#EC3F3F',
+        'dwarn':  '#FFAD3A',
+        'dtxt':   '#FFFFFF',
+        'dsec':   '#C2C7C7',
+        'dmut':   '#6E7070',
+        'dbord':  '#323738',
+      }
+    }
+  }
+}
+</script>
+<style>
+  body { background: #0E0E0E; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #151717; }
+  ::-webkit-scrollbar-thumb { background: #323738; border-radius: 3px; }
+  .glow-green { box-shadow: 0 0 12px rgba(0,208,156,0.3); }
+  .glow-red { box-shadow: 0 0 12px rgba(255,68,79,0.3); }
+  .bar { transition: width 0.3s ease; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+  .live-dot { animation: pulse 1.5s infinite; }
+</style>
+</head>
+<body class="bg-dbg text-dtxt font-sans min-h-screen">
+
+<!-- HEADER -->
+<header class="sticky top-0 z-50 bg-dcard border-b border-dbord px-4 py-2 flex items-center justify-between">
+  <div class="flex items-center gap-2">
+    <span class="text-dred font-bold text-lg">●</span>
+    <span class="font-bold text-sm md:text-base">DERIV SMART TRADER</span>
+  </div>
+  <div class="flex items-center gap-3">
+    <span id="liveStatus" class="flex items-center gap-1 text-xs">
+      <span class="w-2 h-2 rounded-full bg-dgreen live-dot"></span>
+      <span class="text-dsec">LIVE</span>
+    </span>
+    <button onclick="togglePause()" id="pauseBtn"
+      class="text-xs bg-dhover px-3 py-1 rounded border border-dbord hover:border-dsec">
+      ⏸ Pause
+    </button>
+  </div>
+</header>
+
+<!-- STATS BAR -->
+<div id="statsBar" class="grid grid-cols-3 md:grid-cols-6 gap-2 p-3">
+  <div class="bg-dcard rounded-lg p-3 text-center">
+    <div class="text-dmut text-xs">BALANCE</div>
+    <div id="balance" class="text-lg font-bold">$0.00</div>
+  </div>
+  <div class="bg-dcard rounded-lg p-3 text-center">
+    <div class="text-dmut text-xs">SESSION P&L</div>
+    <div id="sessionPnl" class="text-lg font-bold">$0.00</div>
+  </div>
+  <div class="bg-dcard rounded-lg p-3 text-center">
+    <div class="text-dmut text-xs">WIN RATE</div>
+    <div id="winRate" class="text-lg font-bold">0%</div>
+  </div>
+  <div class="bg-dcard rounded-lg p-3 text-center">
+    <div class="text-dmut text-xs">TRADES</div>
+    <div id="trades" class="text-lg font-bold">0/0</div>
+  </div>
+  <div class="bg-dcard rounded-lg p-3 text-center">
+    <div class="text-dmut text-xs">MODE</div>
+    <div id="mode" class="text-sm font-bold">⚪ NORMAL</div>
+  </div>
+  <div class="bg-dcard rounded-lg p-3 text-center">
+    <div class="text-dmut text-xs">TIER</div>
+    <div id="tier" class="text-lg font-bold">-</div>
+  </div>
+</div>
+
+<!-- MAIN GRID -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-3 p-3">
+
+  <!-- SCANNER (Full width on mobile, 2 cols on desktop) -->
+  <div class="lg:col-span-2 bg-dcard rounded-lg border border-dbord">
+    <div class="px-4 py-2 border-b border-dbord flex justify-between items-center">
+      <span class="font-bold text-sm">📊 VOLATILITY SCANNER</span>
+      <span id="readyCount" class="text-xs text-dsec">0 ready</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs md:text-sm">
+        <thead>
+          <tr class="text-dmut border-b border-dbord">
+            <th class="px-3 py-2 text-left">INDEX</th>
+            <th class="px-2 py-2">SCORE</th>
+            <th class="px-2 py-2">DIR</th>
+            <th class="px-2 py-2">TMI</th>
+            <th class="px-2 py-2 hidden md:table-cell">TICKS</th>
+            <th class="px-2 py-2">STATUS</th>
+          </tr>
+        </thead>
+        <tbody id="scannerBody">
+          <tr><td colspan="6" class="text-center py-4 text-dmut">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- GATE ANALYSIS -->
+  <div class="bg-dcard rounded-lg border border-dbord">
+    <div class="px-4 py-2 border-b border-dbord">
+      <span class="font-bold text-sm">🎯 GATE ANALYSIS</span>
+      <span id="gateSymbol" class="text-xs text-dsec ml-2">-</span>
+    </div>
+    <div class="p-4 space-y-3" id="gatesPanel">
+      <div class="space-y-2">
+        <div>
+          <div class="flex justify-between text-xs mb-1">
+            <span>Gate 1: TREND</span><span id="g1Score">0</span>
+          </div>
+          <div class="h-2 bg-dhover rounded-full">
+            <div id="g1Bar" class="bar h-2 bg-dgreen rounded-full" style="width:0%"></div>
+          </div>
+        </div>
+        <div>
+          <div class="flex justify-between text-xs mb-1">
+            <span>Gate 2: MOMENTUM</span><span id="g2Score">0</span>
+          </div>
+          <div class="h-2 bg-dhover rounded-full">
+            <div id="g2Bar" class="bar h-2 bg-dgreen rounded-full" style="width:0%"></div>
+          </div>
+        </div>
+        <div>
+          <div class="flex justify-between text-xs mb-1">
+            <span>Gate 3: PATTERN</span><span id="g3Score">0</span>
+          </div>
+          <div class="h-2 bg-dhover rounded-full">
+            <div id="g3Bar" class="bar h-2 bg-dgreen rounded-full" style="width:0%"></div>
+          </div>
+        </div>
+        <div>
+          <div class="flex justify-between text-xs mb-1">
+            <span>Gate 4: TICK PURITY</span><span id="g4Score">0</span>
+          </div>
+          <div class="h-2 bg-dhover rounded-full">
+            <div id="g4Bar" class="bar h-2 bg-dgreen rounded-full" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+      <div class="border-t border-dbord pt-2">
+        <div class="flex justify-between text-sm font-bold">
+          <span>COMPOSITE</span><span id="compositeScore">0</span>
+        </div>
+        <div class="h-3 bg-dhover rounded-full mt-1">
+          <div id="compositeBar" class="bar h-3 bg-dred rounded-full" style="width:0%"></div>
+        </div>
+        <div id="decision" class="text-center text-xs mt-2 text-dmut">Waiting...</div>
+      </div>
+      <!-- Indicator Values -->
+      <div class="border-t border-dbord pt-2 grid grid-cols-2 gap-1 text-xs" id="indValues">
+        <div>RSI: <span id="indRsi" class="text-dsec">-</span></div>
+        <div>ADX: <span id="indAdx" class="text-dsec">-</span></div>
+        <div>MACD: <span id="indMacd" class="text-dsec">-</span></div>
+        <div>StochK: <span id="indStoch" class="text-dsec">-</span></div>
+        <div>Pattern: <span id="indPattern" class="text-dsec">-</span></div>
+        <div>TMI: <span id="indTmi" class="text-dsec">-</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SECOND ROW -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-3 px-3 pb-3">
+
+  <!-- TRADE LOG -->
+  <div class="bg-dcard rounded-lg border border-dbord">
+    <div class="px-4 py-2 border-b border-dbord flex justify-between">
+      <span class="font-bold text-sm">📝 TRADE LOG</span>
+      <span id="tradeCount" class="text-xs text-dmut">0 trades</span>
+    </div>
+    <div class="overflow-y-auto" style="max-height:300px">
+      <div id="tradeLog" class="divide-y divide-dbord text-xs">
+        <div class="px-4 py-3 text-center text-dmut">No trades yet</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EQUITY CURVE -->
+  <div class="bg-dcard rounded-lg border border-dbord">
+    <div class="px-4 py-2 border-b border-dbord">
+      <span class="font-bold text-sm">📈 PERFORMANCE</span>
+    </div>
+    <div class="p-3" style="height:300px">
+      <canvas id="equityChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- THIRD ROW -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-3 px-3 pb-3">
+
+  <!-- RECOVERY MONITOR -->
+  <div class="bg-dcard rounded-lg border border-dbord">
+    <div class="px-4 py-2 border-b border-dbord">
+      <span class="font-bold text-sm">🔄 RECOVERY</span>
+    </div>
+    <div class="p-4" id="recoveryPanel">
+      <div class="text-center">
+        <div id="recStatus" class="text-sm font-bold text-dgreen mb-2">INACTIVE</div>
+        <div id="recDots" class="flex justify-center gap-2 mb-3">
+          <span class="w-4 h-4 rounded-full bg-dhover border border-dbord"></span>
+          <span class="w-4 h-4 rounded-full bg-dhover border border-dbord"></span>
+          <span class="w-4 h-4 rounded-full bg-dhover border border-dbord"></span>
+          <span class="w-4 h-4 rounded-full bg-dhover border border-dbord"></span>
+        </div>
+        <div class="text-xs text-dmut">
+          <div>Accumulated: <span id="recAccum">$0.00</span></div>
+          <div class="mt-1">Step: <span id="recStep">0/0</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TRADE STATS -->
+  <div class="bg-dcard rounded-lg border border-dbord">
+    <div class="px-4 py-2 border-b border-dbord">
+      <span class="font-bold text-sm">📊 STATS</span>
+    </div>
+    <div class="p-4 text-xs space-y-2" id="statsPanel">
+      <div class="flex justify-between"><span class="text-dmut">Total Profit:</span><span id="stTotalProfit">$0.00</span></div>
+      <div class="flex justify-between"><span class="text-dmut">Avg Win:</span><span id="stAvgWin">$0.00</span></div>
+      <div class="flex justify-between"><span class="text-dmut">Avg Loss:</span><span id="stAvgLoss">$0.00</span></div>
+      <div class="flex justify-between"><span class="text-dmut">Best Trade:</span><span id="stBest">$0.00</span></div>
+      <div class="flex justify-between"><span class="text-dmut">Worst Trade:</span><span id="stWorst">$0.00</span></div>
+      <div class="flex justify-between"><span class="text-dmut">Best Streak:</span><span id="stBestStreak">0</span></div>
+      <div class="flex justify-between"><span class="text-dmut">Max Drawdown:</span><span id="stDrawdown">$0.00</span></div>
+      <div class="flex justify-between"><span class="text-dmut">Best Index:</span><span id="stBestIdx">-</span></div>
+    </div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div class="bg-dcard rounded-lg border border-dbord">
+    <div class="px-4 py-2 border-b border-dbord">
+      <span class="font-bold text-sm">⚙️ SETTINGS</span>
+    </div>
+    <div class="p-4 space-y-3 text-xs">
+      <div>
+        <label class="text-dmut">Max Ticks (Only Ups/Downs)</label>
+        <div class="flex gap-1 mt-1">
+          <button onclick="setSetting('max_ticks',2)" class="stbtn" data-mt="2">2</button>
+          <button onclick="setSetting('max_ticks',3)" class="stbtn" data-mt="3">3</button>
+          <button onclick="setSetting('max_ticks',4)" class="stbtn" data-mt="4">4</button>
+          <button onclick="setSetting('max_ticks',5)" class="stbtn" data-mt="5">5</button>
+        </div>
+      </div>
+      <div>
+        <label class="text-dmut">Daily Loss Limit (%)</label>
+        <input type="range" id="lossLimit" min="5" max="25" value="15"
+          class="w-full mt-1" oninput="updateLossLabel(this.value)">
+        <span id="lossLimitVal" class="text-dsec">15%</span>
+      </div>
+      <div>
+        <label class="text-dmut">Compound After (wins)</label>
+        <input type="range" id="compTrigger" min="2" max="8" value="4"
+          class="w-full mt-1" oninput="updateCompLabel(this.value)">
+        <span id="compTriggerVal" class="text-dsec">4 wins</span>
+      </div>
+      <div class="pt-2 flex gap-2">
+        <button onclick="applySettings()"
+          class="flex-1 bg-dred text-white py-2 rounded font-bold text-xs hover:opacity-90">
+          Apply
+        </button>
+        <button onclick="unlockAccount()"
+          class="flex-1 bg-dhover text-dsec py-2 rounded font-bold text-xs border border-dbord hover:border-dsec">
+          🔓 Unlock
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .stbtn {
+    padding: 6px 14px; border-radius: 6px; font-weight: bold;
+    background: #242828; border: 1px solid #323738; color: #C2C7C7;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .stbtn:hover, .stbtn.active { background: #FF444F; color: white; border-color: #FF444F; }
+</style>
+
+<script>
+// ═══════════════════════════════════════════════
+// WEBSOCKET CONNECTION
+// ═══════════════════════════════════════════════
+let ws = null;
+let reconnectTimer = null;
+const statusIcons = {
+  'TRADING':'🔥','READY':'⚡','WATCHING':'👁️','NO_TREND':'💤','IDLE':'⏸️'
+};
+const statusColors = {
+  'TRADING':'text-dred','READY':'text-dgreen','WATCHING':'text-dwarn',
+  'NO_TREND':'text-dmut','IDLE':'text-dmut'
+};
+let currentGateSymbol = null;
+let equityChart = null;
+let tradeEntries = [];
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById('liveStatus').innerHTML =
+      '<span class="w-2 h-2 rounded-full bg-dgreen live-dot"></span>' +
+      '<span class="text-dsec">LIVE</span>';
+    if (reconnectTimer) clearInterval(reconnectTimer);
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    handleMessage(msg);
+  };
+
+  ws.onclose = () => {
+    document.getElementById('liveStatus').innerHTML =
+      '<span class="w-2 h-2 rounded-full bg-dloss"></span>' +
+      '<span class="text-dloss">OFFLINE</span>';
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function send(data) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(data)); }
+
+// ═══════════════════════════════════════════════
+// MESSAGE ROUTER
+// ═══════════════════════════════════════════════
+function handleMessage(msg) {
+  switch(msg.type) {
+    case 'snapshot': handleSnapshot(msg.data); break;
+    case 'account':  updateAccount(msg.data); break;
+    case 'scanner':  updateScanner(msg.data); break;
+    case 'trade':    addTrade(msg.data); break;
+    case 'tick':     updateTick(msg.data); break;
+    case 'performance': updateChart(msg.data); break;
+    case 'recovery': updateRecovery(msg.data); break;
+    case 'gates':    updateGates(msg.data); break;
+  }
+}
+
+function handleSnapshot(data) {
+  if (data.account) updateAccount(data.account);
+  if (data.scanner) updateScanner(data.scanner);
+  if (data.trade_history) {
+    tradeEntries = data.trade_history;
+    renderTradeLog();
+  }
+  if (data.equity_curve) updateChart(data.equity_curve);
+  if (data.trade_stats) updateStats(data.trade_stats);
+}
+
+// ═══════════════════════════════════════════════
+// ACCOUNT UPDATE
+// ═══════════════════════════════════════════════
+function updateAccount(a) {
+  setText('balance', '$' + a.balance.toFixed(2));
+  const pnl = a.session_pnl || 0;
+  const pnlEl = document.getElementById('sessionPnl');
+  pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+  pnlEl.className = 'text-lg font-bold ' + (pnl >= 0 ? 'text-dgreen' : 'text-dloss');
+
+  setText('winRate', a.win_rate + '%');
+  setText('trades', a.total_wins + '/' + a.total_trades);
+  setText('mode', a.mode || '⚪ NORMAL');
+  setText('tier', a.tier || '-');
+
+  // Recovery
+  if (a.recovery) {
+    updateRecovery(a.recovery);
+  } else {
+    document.getElementById('recStatus').textContent = 'INACTIVE';
+    document.getElementById('recStatus').className = 'text-sm font-bold text-dgreen mb-2';
+    document.getElementById('recAccum').textContent = '$0.00';
+    document.getElementById('recStep').textContent = '0/0';
+    resetRecoveryDots(0, 4);
+  }
+
+  // Stats from account
+  setText('stBestStreak', a.best_streak || 0);
+  setText('stDrawdown', '$' + (a.max_drawdown || 0).toFixed(2));
+}
+
+// ═══════════════════════════════════════════════
+// SCANNER UPDATE
+// ═══════════════════════════════════════════════
+function updateScanner(data) {
+  const body = document.getElementById('scannerBody');
+  let html = '';
+  let readyCount = 0;
+  let bestScore = 0;
+  let bestSymbol = null;
+
+  data.forEach(s => {
+    if (s.status === 'READY') readyCount++;
+    if (s.score > bestScore) { bestScore = s.score; bestSymbol = s.symbol; }
+
+    const dirIcon = s.direction === 'UP' ? '▲' : s.direction === 'DOWN' ? '▼' : '─';
+    const dirColor = s.direction === 'UP' ? 'text-dgreen' : s.direction === 'DOWN' ? 'text-dloss' : 'text-dmut';
+    const statusIcon = statusIcons[s.status] || '⏸️';
+    const statusClr = statusColors[s.status] || 'text-dmut';
+    const scoreW = Math.min(s.score, 100);
+    const barColor = s.score >= 65 ? '#00D09C' : s.score >= 40 ? '#FFAD3A' : '#323738';
+
+    html += `
+      <tr class="border-b border-dbord hover:bg-dhover cursor-pointer" onclick="selectIndex('${s.symbol}')">
+        <td class="px-3 py-2 font-medium">${s.name || s.symbol}</td>
+        <td class="px-2 py-2 text-center">
+          <div class="flex items-center gap-1 justify-center">
+            <div class="w-16 h-1.5 bg-dhover rounded-full">
+              <div class="h-1.5 rounded-full" style="width:${scoreW}%;background:${barColor}"></div>
+            </div>
+            <span class="w-6 text-right">${Math.round(s.score)}</span>
+          </div>
+        </td>
+        <td class="px-2 py-2 text-center ${dirColor} font-bold">${dirIcon}</td>
+        <td class="px-2 py-2 text-center">${Math.round(s.tmi)}%</td>
+        <td class="px-2 py-2 text-center hidden md:table-cell">${s.max_ticks || '-'}</td>
+        <td class="px-2 py-2 text-center ${statusClr}">${statusIcon} <span class="hidden md:inline">${s.status}</span></td>
+      </tr>`;
+  });
+
+  body.innerHTML = html || '<tr><td colspan="6" class="text-center py-4 text-dmut">No data</td></tr>';
+  setText('readyCount', readyCount + ' ready');
+
+  // Auto-select best index for gate display
+  if (bestSymbol && !currentGateSymbol) selectIndex(bestSymbol);
+
+  // Update gates if current symbol is in data
+  if (currentGateSymbol) {
+    const current = data.find(s => s.symbol === currentGateSymbol);
+    if (current && current.gate_scores) {
+      updateGateDisplay(current.gate_scores, current.score, current);
+    }
+  }
+}
+
+function selectIndex(symbol) {
+  currentGateSymbol = symbol;
+  setText('gateSymbol', symbol);
+}
+
+// ═══════════════════════════════════════════════
+// GATE ANALYSIS
+// ═══════════════════════════════════════════════
+function updateGates(data) {
+  if (data.gate_scores) updateGateDisplay(data.gate_scores, data.composite, data);
+}
+
+function updateGateDisplay(gates, composite, data) {
+  const g1 = gates.trend || 0, g2 = gates.momentum || 0;
+  const g3 = gates.pattern || 0, g4 = gates.tick_purity || 0;
+  const comp = composite || 0;
+
+  setBar('g1', g1); setBar('g2', g2);
+  setBar('g3', g3); setBar('g4', g4);
+
+  setText('compositeScore', Math.round(comp));
+  const cBar = document.getElementById('compositeBar');
+  cBar.style.width = comp + '%';
+  cBar.className = 'bar h-3 rounded-full ' + (comp >= 65 ? 'bg-dgreen' : comp >= 40 ? 'bg-dwarn' : 'bg-dloss');
+
+  const dec = document.getElementById('decision');
+  if (comp >= 65) {
+    dec.textContent = '⚡ TRADE SIGNAL ACTIVE';
+    dec.className = 'text-center text-xs mt-2 text-dgreen font-bold';
+  } else if (comp >= 40) {
+    dec.textContent = '👁️ Watching...';
+    dec.className = 'text-center text-xs mt-2 text-dwarn';
+  } else {
+    dec.textContent = 'No signal';
+    dec.className = 'text-center text-xs mt-2 text-dmut';
+  }
+
+  // Indicator values
+  if (data && data.indicator_values) {
+    const iv = data.indicator_values;
+    setText('indRsi', iv.rsi_2m ? iv.rsi_2m.toFixed(1) : '-');
+    setText('indAdx', iv.adx_5m ? iv.adx_5m.toFixed(1) : '-');
+    setText('indMacd', iv.macd_hist ? iv.macd_hist.toFixed(5) : '-');
+    setText('indStoch', iv.stoch_k ? iv.stoch_k.toFixed(1) : '-');
+    setText('indPattern', iv.pattern || 'NONE');
+    setText('indTmi', iv.tmi ? iv.tmi.toFixed(1) + '%' : '-');
+  }
+}
+
+function setBar(prefix, value) {
+  setText(prefix + 'Score', Math.round(value));
+  const bar = document.getElementById(prefix + 'Bar');
+  bar.style.width = value + '%';
+  bar.className = 'bar h-2 rounded-full ' + (value >= 60 ? 'bg-dgreen' : value >= 35 ? 'bg-dwarn' : 'bg-dloss');
+}
+
+// ═══════════════════════════════════════════════
+// TRADE LOG
+// ═══════════════════════════════════════════════
+function addTrade(t) {
+  // Update or add
+  const idx = tradeEntries.findIndex(e => e.id === t.id);
+  if (idx >= 0) tradeEntries[idx] = t;
+  else tradeEntries.unshift(t);
+
+  if (tradeEntries.length > 100) tradeEntries = tradeEntries.slice(0, 100);
+  renderTradeLog();
+  setText('tradeCount', tradeEntries.length + ' trades');
+}
+
+function renderTradeLog() {
+  const container = document.getElementById('tradeLog');
+  if (!tradeEntries.length) {
+    container.innerHTML = '<div class="px-4 py-3 text-center text-dmut">No trades yet</div>';
+    return;
+  }
+
+  let html = '';
+  tradeEntries.slice(0, 50).forEach(t => {
+    const isWin = t.result === 'WIN';
+    const isPending = t.result === 'PENDING';
+    const icon = isPending ? '⏳' : isWin ? '✅' : '❌';
+    const profitColor = isPending ? 'text-dsec' : isWin ? 'text-dgreen' : 'text-dloss';
+    const profit = isPending ? 'pending' : (isWin?'+':'')+('$'+Math.abs(t.profit).toFixed(2));
+    const dir = t.direction === 'UP' ? '▲' : '▼';
+    const dirC = t.direction === 'UP' ? 'text-dgreen' : 'text-dloss';
+    const time = t.open_time ? new Date(t.open_time*1000).toLocaleTimeString() : '';
+    const ticks = t.tick_count ? t.tick_count+'T' : 'H/L';
+
+    html += `
+      <div class="px-4 py-2 flex items-center justify-between hover:bg-dhover">
+        <div class="flex items-center gap-2">
+          <span>${icon}</span>
+          <span class="text-dmut">${time}</span>
+          <span class="font-medium">${t.symbol}</span>
+          <span class="${dirC} font-bold">${dir}</span>
+          <span class="text-dmut">${ticks}</span>
+        </div>
+        <span class="${profitColor} font-bold">${profit}</span>
+      </div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════
+// TICK UPDATE
+// ═══════════════════════════════════════════════
+function updateTick(data) {
+  // Could update live price display if needed
+}
+
+// ═══════════════════════════════════════════════
+// RECOVERY PANEL
+// ═══════════════════════════════════════════════
+function updateRecovery(r) {
+  if (!r || !r.active) {
+    document.getElementById('recStatus').textContent = 'INACTIVE';
+    document.getElementById('recStatus').className = 'text-sm font-bold text-dgreen mb-2';
+    setText('recAccum', '$0.00');
+    setText('recStep', '0/0');
+    resetRecoveryDots(0, 4);
+    return;
+  }
+
+  document.getElementById('recStatus').textContent = 'ACTIVE';
+  document.getElementById('recStatus').className = 'text-sm font-bold text-dwarn mb-2';
+  setText('recAccum', '$' + (r.accumulated_loss || 0).toFixed(2));
+  setText('recStep', (r.step || 1) + '/' + (r.max_steps || 4));
+  resetRecoveryDots(r.step || 1, r.max_steps || 4);
+}
+
+function resetRecoveryDots(active, total) {
+  const container = document.getElementById('recDots');
+  let html = '';
+  for (let i = 0; i < total; i++) {
+    const color = i < active ? 'bg-dwarn border-dwarn' : 'bg-dhover border-dbord';
+    html += `<span class="w-4 h-4 rounded-full ${color} border"></span>`;
+  }
+  container.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════
+// STATS UPDATE
+// ═══════════════════════════════════════════════
+function updateStats(s) {
+  if (!s) return;
+  const profitColor = (s.total_profit||0) >= 0 ? 'text-dgreen' : 'text-dloss';
+  document.getElementById('stTotalProfit').className = profitColor;
+  setText('stTotalProfit', '$' + (s.total_profit||0).toFixed(2));
+  setText('stAvgWin', '$' + (s.avg_win||0).toFixed(2));
+  setText('stAvgLoss', '$' + Math.abs(s.avg_loss||0).toFixed(2));
+  setText('stBest', '$' + (s.best_trade||0).toFixed(2));
+  setText('stWorst', '$' + (s.worst_trade||0).toFixed(2));
+  setText('stBestIdx', s.best_index || '-');
+}
+
+// ═══════════════════════════════════════════════
+// EQUITY CHART
+// ═══════════════════════════════════════════════
+function initChart() {
+  const ctx = document.getElementById('equityChart').getContext('2d');
+  equityChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: '#FF444F',
+        backgroundColor: 'rgba(255,68,79,0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          display: true,
+          grid: { color: '#1E2222' },
+          ticks: { color: '#6E7070', maxTicksLimit: 6, font: { size: 10 } }
+        },
+        y: {
+          display: true,
+          grid: { color: '#1E2222' },
+          ticks: { color: '#6E7070', font: { size: 10 },
+            callback: v => '$' + v.toFixed(0) }
+        }
+      },
+      interaction: { intersect: false, mode: 'index' },
+    }
+  });
+}
+
+function updateChart(curve) {
+  if (!equityChart || !curve || !curve.length) return;
+  const labels = curve.map(p =>
+    new Date((p.time||0)*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
+  );
+  const data = curve.map(p => p.balance || 0);
+
+  // Color based on performance
+  const first = data[0] || 0;
+  const last = data[data.length-1] || 0;
+  const color = last >= first ? '#00D09C' : '#EC3F3F';
+  const bgColor = last >= first ? 'rgba(0,208,156,0.1)' : 'rgba(236,63,63,0.1)';
+
+  equityChart.data.labels = labels;
+  equityChart.data.datasets[0].data = data;
+  equityChart.data.datasets[0].borderColor = color;
+  equityChart.data.datasets[0].backgroundColor = bgColor;
+  equityChart.update('none');
+}
+
+// ═══════════════════════════════════════════════
+// SETTINGS CONTROLS
+// ═══════════════════════════════════════════════
+function setSetting(key, val) {
+  document.querySelectorAll('.stbtn').forEach(b => {
+    if (b.dataset.mt) {
+      b.classList.toggle('active', parseInt(b.dataset.mt) === val);
+    }
+  });
+}
+
+function updateLossLabel(v) { setText('lossLimitVal', v + '%'); }
+function updateCompLabel(v) { setText('compTriggerVal', v + ' wins'); }
+
+function applySettings() {
+  const activeBtn = document.querySelector('.stbtn.active');
+  const maxTicks = activeBtn ? parseInt(activeBtn.dataset.mt) : null;
+  const settings = {
+    daily_loss_limit: parseInt(document.getElementById('lossLimit').value),
+    compound_trigger: parseInt(document.getElementById('compTrigger').value),
+  };
+  if (maxTicks) settings.max_ticks = maxTicks;
+
+  send({ action: 'update_settings', settings });
+}
+
+function unlockAccount() {
+  send({ action: 'unlock' });
+}
+
+function togglePause() {
+  send({ action: 'pause' });
+  const btn = document.getElementById('pauseBtn');
+  if (btn.textContent.includes('Pause')) {
+    btn.textContent = '▶ Resume';
+    btn.classList.add('border-dgreen');
+  } else {
+    btn.textContent = '⏸ Pause';
+    btn.classList.remove('border-dgreen');
+  }
+}
+
+// ═══════════════════════════════════════════════
+// UTILITIES
+// ═══════════════════════════════════════════════
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+// ═══════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════
+window.addEventListener('load', () => {
+  initChart();
+  connect();
+  // Refresh state every 30s
+  setInterval(() => send({action:'get_state'}), 30000);
+});
+</script>
+</body>
+</html>
